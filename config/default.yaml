@@ -1,0 +1,27 @@
+project:
+  name: dog-walker-extractor
+  version: 0.1.0-dev
+
+runtime:
+  device: cpu
+  python: "3.12"
+
+detector:
+  model: yolo11n.pt
+  image_size: 640
+  confidence: 0.25
+  classes:
+    person: 0
+    dog: 16
+
+tracker:
+  type: bytetrack
+
+association:
+  enabled: true
+
+output:
+  save_debug_video: true
+  save_csv: true
+  save_json: true
+  save_clips: true
