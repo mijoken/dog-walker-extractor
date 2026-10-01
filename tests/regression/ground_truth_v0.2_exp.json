@@ -1,0 +1,212 @@
+{
+  "schema_version": 1,
+  "description": "v0.2 experiment A: duration-factor saturation changed from 3.0 seconds to 2.5 seconds; event thresholds unchanged.",
+  "evaluation_policy": {
+    "positive_hit_rule": "A prediction is a hit when its time interval overlaps any accepted window for that positive case.",
+    "negative_rule": "Any prediction overlapping a known-negative window is counted as a regression false positive.",
+    "duplicate_rule": "More than one prediction overlapping the same positive case is reported as possible over-segmentation.",
+    "note": "This dataset is for regression testing, not a definitive whole-video recall benchmark."
+  },
+  "validations": [
+    {
+      "id": "001",
+      "event_json_candidates": [
+        "output/blind_test_001/precision_candidates/dog_walker_events_exp.json",
+        "output/blind_test_001/dog_walker_events_exp.json",
+        "output/precision_candidates/dog_walker_events_exp.json"
+      ],
+      "review_scope": "Confirmed system-positive intervals only; not exhaustive whole-video annotation.",
+      "positive_cases": [
+        {
+          "case_id": "V001-P001",
+          "description": "Confirmed dog-walking event",
+          "windows": [
+            {
+              "start_sec": 845.8,
+              "end_sec": 851.23
+            }
+          ],
+          "baseline_status": "TP"
+        },
+        {
+          "case_id": "V001-P002",
+          "description": "Confirmed dog-walking event",
+          "windows": [
+            {
+              "start_sec": 890.4,
+              "end_sec": 898.7
+            }
+          ],
+          "baseline_status": "TP"
+        }
+      ],
+      "negative_windows": []
+    },
+    {
+      "id": "002",
+      "event_json_candidates": [
+        "output/blind_test_002/precision_candidates/dog_walker_events_exp.json"
+      ],
+      "review_scope": "All eight coarse candidate windows manually reviewed.",
+      "positive_cases": [
+        {
+          "case_id": "V002-P006",
+          "description": "Dog walker; short visible interval; baseline false negative",
+          "windows": [
+            {
+              "start_sec": 952.17,
+              "end_sec": 964.17
+            }
+          ],
+          "baseline_status": "FN",
+          "improvement_target": true
+        },
+        {
+          "case_id": "V002-P007",
+          "description": "Dog walker; baseline detected",
+          "windows": [
+            {
+              "start_sec": 1075.0,
+              "end_sec": 1092.5
+            }
+          ],
+          "baseline_status": "TP"
+        },
+        {
+          "case_id": "V002-P008",
+          "description": "Same walker returns into frame; dog track survived one frame; baseline false negative",
+          "windows": [
+            {
+              "start_sec": 1096.0,
+              "end_sec": 1106.0
+            }
+          ],
+          "baseline_status": "FN",
+          "improvement_target": true
+        }
+      ],
+      "negative_windows": [
+        {
+          "case_id": "V002-N001",
+          "start_sec": 141.67,
+          "end_sec": 151.67,
+          "description": "No dog walker"
+        },
+        {
+          "case_id": "V002-N002",
+          "start_sec": 212.17,
+          "end_sec": 222.17,
+          "description": "No dog walker; possible lower-body coarse misclassification"
+        },
+        {
+          "case_id": "V002-N003",
+          "start_sec": 298.17,
+          "end_sec": 308.17,
+          "description": "Stroller"
+        },
+        {
+          "case_id": "V002-N004",
+          "start_sec": 494.17,
+          "end_sec": 504.17,
+          "description": "Two bicycles"
+        },
+        {
+          "case_id": "V002-N005",
+          "start_sec": 764.67,
+          "end_sec": 774.67,
+          "description": "Small child jumping"
+        }
+      ]
+    },
+    {
+      "id": "003",
+      "event_json_candidates": [
+        "output/blind_test_003/precision_candidates/dog_walker_events_exp.json"
+      ],
+      "review_scope": "All eleven coarse candidate windows manually reviewed; whole video additionally reviewed approximately.",
+      "positive_cases": [
+        {
+          "case_id": "V003-P002-004",
+          "description": "One dog-walking passage continuing through Candidates 002, 003 and 004",
+          "windows": [
+            {
+              "start_sec": 586.5,
+              "end_sec": 597.67
+            },
+            {
+              "start_sec": 601.33,
+              "end_sec": 612.0
+            },
+            {
+              "start_sec": 622.5,
+              "end_sec": 638.67
+            }
+          ],
+          "baseline_status": "TP_PASSAGE",
+          "known_partial_misses": [
+            "candidate_002",
+            "candidate_003"
+          ],
+          "improvement_target": true
+        },
+        {
+          "case_id": "V003-P007",
+          "description": "One person walking two dogs",
+          "windows": [
+            {
+              "start_sec": 1160.33,
+              "end_sec": 1183.17
+            }
+          ],
+          "baseline_status": "TP_OVERSEGMENTED",
+          "expected_real_passages": 1,
+          "improvement_target": true
+        }
+      ],
+      "negative_windows": [
+        {
+          "case_id": "V003-N001",
+          "start_sec": 549.5,
+          "end_sec": 559.5,
+          "description": "Brown fluttering/frilled skirt"
+        },
+        {
+          "case_id": "V003-N005",
+          "start_sec": 836.5,
+          "end_sec": 846.5,
+          "description": "Brown handbag lifted from ground"
+        },
+        {
+          "case_id": "V003-N006",
+          "start_sec": 1107.0,
+          "end_sec": 1117.0,
+          "description": "Runner"
+        },
+        {
+          "case_id": "V003-N008",
+          "start_sec": 1257.17,
+          "end_sec": 1271.33,
+          "description": "Brown handbag and wheeled case"
+        },
+        {
+          "case_id": "V003-N009",
+          "start_sec": 1264.67,
+          "end_sec": 1274.67,
+          "description": "Brown handbag in distant background"
+        },
+        {
+          "case_id": "V003-N010",
+          "start_sec": 1316.83,
+          "end_sec": 1327.83,
+          "description": "Brown handbag"
+        },
+        {
+          "case_id": "V003-N011",
+          "start_sec": 1373.67,
+          "end_sec": 1387.0,
+          "description": "Stroller in distant background"
+        }
+      ]
+    }
+  ]
+}
