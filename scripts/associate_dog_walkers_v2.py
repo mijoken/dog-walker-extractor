@@ -255,12 +255,12 @@ def pair_score(
     # Brief encounters should not beat persistent companionship.
     #
     # 0 sec -> 0
-    # 1 sec -> 0.577
-    # 3 sec -> 1
+    # 1 sec -> 0.632
+    # 2.5 sec -> 1
     duration_factor = min(
         1.0,
         math.sqrt(
-            common_span_sec / 3.0
+            common_span_sec / 2.5
         )
         if common_span_sec > 0
         else 0.0,
