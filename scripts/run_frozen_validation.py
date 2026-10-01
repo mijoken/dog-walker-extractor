@@ -121,7 +121,7 @@ def main() -> int:
 
     print("")
     print("==========================================")
-    print(" BLIND VALIDATION 002 COMPLETE")
+    print(" FROZEN VALIDATION PIPELINE COMPLETE")
     print("==========================================")
 
     return 0
@@ -129,3 +129,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
