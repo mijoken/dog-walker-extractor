@@ -253,6 +253,15 @@ def main() -> int:
     )
 
     parser.add_argument(
+        "--output-root",
+        help=(
+            "Optional explicit output directory. "
+            "When omitted, the legacy "
+            "output/blind_test_<validation-id> path is used."
+        ),
+    )
+
+    parser.add_argument(
         "--force",
         action="store_true",
         help=(
@@ -288,11 +297,16 @@ def main() -> int:
             "validation-id must not be empty."
         )
 
-    output_root = (
-        REPO
-        / "output"
-        / f"blind_test_{validation_id}"
-    )
+    if args.output_root:
+        output_root = Path(
+            args.output_root
+        ).resolve()
+    else:
+        output_root = (
+            REPO
+            / "output"
+            / f"blind_test_{validation_id}"
+        )
 
     scan_dir = (
         output_root
