@@ -73,6 +73,257 @@ def short_path_hash(path: Path) -> str:
     ).hexdigest()[:8]
 
 
+def file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+
+    with path.open("rb") as f:
+        while True:
+            chunk = f.read(
+                1024 * 1024
+            )
+
+            if not chunk:
+                break
+
+            digest.update(
+                chunk
+            )
+
+    return digest.hexdigest()
+
+
+def write_json_atomic(
+    path: Path,
+    payload: dict,
+) -> None:
+    path.parent.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    temp_path = path.with_name(
+        path.name + ".tmp"
+    )
+
+    with temp_path.open(
+        "w",
+        encoding="utf-8",
+        newline="",
+    ) as f:
+        json.dump(
+            payload,
+            f,
+            ensure_ascii=False,
+            indent=2,
+        )
+
+        f.write("\n")
+        f.flush()
+
+    temp_path.replace(path)
+
+
+def new_batch_state(
+    *,
+    source_root: Path,
+    plan: list[tuple],
+) -> dict:
+    now = (
+        datetime.now()
+        .astimezone()
+        .isoformat()
+    )
+
+    videos = []
+
+    for (
+        index,
+        video,
+        identifier,
+        run_dir,
+    ) in plan:
+        relative = video.relative_to(
+            source_root
+        )
+
+        videos.append(
+            {
+                "index": index,
+                "identifier": identifier,
+                "relative_path": str(relative),
+                "source_path": str(video),
+                "run_dir": str(run_dir),
+                "status": "pending",
+                "sha256": None,
+                "started_at": None,
+                "finished_at": None,
+                "error": None,
+            }
+        )
+
+    return {
+        "schema_version": 1,
+        "pipeline": "dog_walker_folder_pipeline",
+        "source_root": str(source_root),
+        "created_at": now,
+        "updated_at": now,
+        "status": "running",
+        "videos": videos,
+    }
+
+
+def update_batch_state_video(
+    *,
+    state: dict,
+    identifier: str,
+    status: str,
+    sha256: str | None = None,
+    error: str | None = None,
+) -> None:
+    now = (
+        datetime.now()
+        .astimezone()
+        .isoformat()
+    )
+
+    matches = [
+        item
+        for item in state.get(
+            "videos",
+            [],
+        )
+        if item.get("identifier")
+        == identifier
+    ]
+
+    if len(matches) != 1:
+        raise RuntimeError(
+            "batch_state video lookup failed "
+            f"for {identifier}: "
+            f"{len(matches)} matches"
+        )
+
+    item = matches[0]
+
+    item["status"] = status
+    item["error"] = error
+
+    if status == "running":
+        item["started_at"] = now
+        item["finished_at"] = None
+
+    elif status in {
+        "completed",
+        "failed",
+    }:
+        item["finished_at"] = now
+
+    if sha256 is not None:
+        item["sha256"] = sha256
+
+    state["updated_at"] = now
+
+
+def get_batch_state_video(
+    *,
+    state: dict,
+    identifier: str,
+) -> dict | None:
+    matches = [
+        item
+        for item in state.get(
+            "videos",
+            [],
+        )
+        if item.get("identifier")
+        == identifier
+    ]
+
+    if len(matches) > 1:
+        raise RuntimeError(
+            "Duplicate batch_state identifier: "
+            f"{identifier}"
+        )
+
+    if not matches:
+        return None
+
+    return matches[0]
+
+
+def manifest_completion_proof(
+    *,
+    video: Path,
+    run_dir: Path,
+) -> tuple[bool, str | None, str]:
+    manifest_path = (
+        run_dir
+        / "run_manifest.json"
+    )
+
+    if not manifest_path.exists():
+        return (
+            False,
+            None,
+            "no completed manifest",
+        )
+
+    try:
+        manifest = load_json(
+            manifest_path
+        )
+
+        manifest_input = (
+            manifest.get(
+                "input",
+                {},
+            )
+        )
+
+        stored_sha256 = (
+            manifest_input.get(
+                "sha256"
+            )
+        )
+
+        finished_at = (
+            manifest.get(
+                "timing",
+                {},
+            ).get(
+                "finished_at"
+            )
+        )
+
+        if not stored_sha256:
+            return (
+                False,
+                None,
+                "manifest SHA-256 missing",
+            )
+
+        if not finished_at:
+            return (
+                False,
+                stored_sha256,
+                "manifest finished_at missing",
+            )
+
+        return (
+            True,
+            stored_sha256,
+            "completed manifest",
+        )
+
+    except Exception as exc:
+        return (
+            False,
+            None,
+            "manifest validation failed: "
+            f"{exc}",
+        )
+
+
 def discover_videos(root: Path) -> list[Path]:
     videos = []
 
@@ -454,6 +705,24 @@ def main() -> int:
         ),
     )
 
+    parser.add_argument(
+        "--resume-batch",
+        help=(
+            "Resume an existing batch directory. "
+            "Completed videos with matching SHA-256 "
+            "are reused."
+        ),
+    )
+
+    parser.add_argument(
+        "--resume-check",
+        action="store_true",
+        help=(
+            "Inspect resume eligibility without "
+            "processing any video."
+        ),
+    )
+
     args = parser.parse_args()
 
     source_root = Path(
@@ -526,20 +795,38 @@ def main() -> int:
         )
         return 0
 
-    batch_id = (
-        safe_name(
-            args.batch_id
-        )
-        if args.batch_id
-        else datetime.now().strftime(
-            "%Y%m%d_%H%M%S"
-        )
-    )
+    if args.resume_batch:
+        batch_dir = Path(
+            args.resume_batch
+        ).resolve()
 
-    batch_dir = (
-        output_root
-        / batch_id
-    )
+        if not batch_dir.exists():
+            raise FileNotFoundError(
+                batch_dir
+            )
+
+        if not batch_dir.is_dir():
+            raise NotADirectoryError(
+                batch_dir
+            )
+
+        batch_id = batch_dir.name
+
+    else:
+        batch_id = (
+            safe_name(
+                args.batch_id
+            )
+            if args.batch_id
+            else datetime.now().strftime(
+                "%Y%m%d_%H%M%S"
+            )
+        )
+
+        batch_dir = (
+            output_root
+            / batch_id
+        )
 
     print(
         f"batch dir  : {batch_dir}"
@@ -604,10 +891,358 @@ def main() -> int:
         )
         return 0
 
+    resume_items = {}
+
+    if args.resume_batch:
+        print("")
+        print("RESUME INSPECTION")
+
+        resume_state_path = (
+            batch_dir
+            / "batch_state.json"
+        )
+
+        resume_state = None
+
+        if resume_state_path.exists():
+            resume_state = load_json(
+                resume_state_path
+            )
+
+            if (
+                resume_state.get(
+                    "schema_version"
+                )
+                != 1
+            ):
+                raise RuntimeError(
+                    "Unsupported batch_state "
+                    "schema version."
+                )
+
+            print(
+                "  mode: batch_state v1"
+            )
+
+        else:
+            print(
+                "  mode: legacy manifest"
+            )
+
+        for (
+            index,
+            video,
+            identifier,
+            run_dir,
+        ) in plan:
+
+            status = "REPROCESS"
+            reason = "not verified"
+
+            proof_ok, manifest_sha256, proof_reason = (
+                manifest_completion_proof(
+                    video=video,
+                    run_dir=run_dir,
+                )
+            )
+
+            if resume_state is not None:
+                state_item = (
+                    get_batch_state_video(
+                        state=resume_state,
+                        identifier=identifier,
+                    )
+                )
+
+                relative_path = str(
+                    video.relative_to(
+                        source_root
+                    )
+                )
+
+                if state_item is None:
+                    reason = (
+                        "batch_state entry missing"
+                    )
+
+                elif (
+                    state_item.get("relative_path")
+                    != relative_path
+                ):
+                    reason = (
+                        "relative path changed"
+                    )
+
+                elif (
+                    state_item.get("status")
+                    != "completed"
+                ):
+                    reason = (
+                        "batch_state status is "
+                        f"{state_item.get('status')}"
+                    )
+
+                elif not state_item.get(
+                    "sha256"
+                ):
+                    reason = (
+                        "batch_state SHA-256 missing"
+                    )
+
+                elif not proof_ok:
+                    reason = proof_reason
+
+                elif (
+                    manifest_sha256
+                    != state_item.get(
+                        "sha256"
+                    )
+                ):
+                    reason = (
+                        "batch_state / manifest "
+                        "SHA-256 mismatch"
+                    )
+
+                else:
+                    current_sha256 = (
+                        file_sha256(
+                            video
+                        )
+                    )
+
+                    if (
+                        current_sha256
+                        == manifest_sha256
+                    ):
+                        status = "SKIP"
+                        reason = (
+                            "completed state, "
+                            "relative path and "
+                            "SHA-256 verified"
+                        )
+
+                        resume_items[
+                            identifier
+                        ] = (
+                            collect_run_summary(
+                                source_video=video,
+                                run_dir=run_dir,
+                                roi_enabled=(
+                                    roi_profile
+                                    is not None
+                                ),
+                            )
+                        )
+
+                    else:
+                        reason = (
+                            "current video "
+                            "SHA-256 changed"
+                        )
+
+            else:
+                # Legacy Phase-1 compatibility.
+                if proof_ok:
+                    try:
+                        manifest = load_json(
+                            run_dir
+                            / "run_manifest.json"
+                        )
+
+                        stored_path = (
+                            manifest.get(
+                                "input",
+                                {},
+                            ).get(
+                                "path"
+                            )
+                        )
+
+                        current_sha256 = (
+                            file_sha256(
+                                video
+                            )
+                        )
+
+                        if (
+                            current_sha256
+                            == manifest_sha256
+                        ):
+                            status = "SKIP"
+                            reason = (
+                                "legacy completed "
+                                "manifest and SHA-256 match"
+                            )
+
+                            resume_items[
+                                identifier
+                            ] = (
+                                collect_run_summary(
+                                    source_video=video,
+                                    run_dir=run_dir,
+                                    roi_enabled=(
+                                        roi_profile
+                                        is not None
+                                    ),
+                                )
+                            )
+
+                        else:
+                            reason = (
+                                "SHA-256 changed"
+                            )
+
+                        if (
+                            stored_path
+                            and Path(
+                                stored_path
+                            ).resolve()
+                            != video.resolve()
+                        ):
+                            status = "REPROCESS"
+                            reason = (
+                                "legacy manifest "
+                                "input path changed"
+                            )
+
+                            resume_items.pop(
+                                identifier,
+                                None,
+                            )
+
+                    except Exception as exc:
+                        status = "REPROCESS"
+                        reason = (
+                            "legacy manifest "
+                            "validation failed: "
+                            f"{exc}"
+                        )
+
+                        resume_items.pop(
+                            identifier,
+                            None,
+                        )
+
+                else:
+                    reason = proof_reason
+
+            print(
+                f"  {index:04d} "
+                f"{status:<9} "
+                f"{video}"
+            )
+
+            print(
+                f"       {reason}"
+            )
+
+        if args.resume_check:
+            skip_count = len(
+                resume_items
+            )
+
+            reprocess_count = (
+                len(plan)
+                - skip_count
+            )
+
+            print("")
+            print(
+                "RESUME CHECK ONLY - "
+                "no video processing performed."
+            )
+
+            print(
+                f"completed / skip : {skip_count}"
+            )
+
+            print(
+                f"needs processing : {reprocess_count}"
+            )
+
+            print(
+                "FOLDER_PIPELINE_RESUME_CHECK_OK"
+            )
+
+            return 0
+
+    elif args.resume_check:
+        raise ValueError(
+            "--resume-check requires --resume-batch"
+        )
+
     batch_dir.mkdir(
         parents=True,
         exist_ok=True,
     )
+
+    batch_state_path = (
+        batch_dir
+        / "batch_state.json"
+    )
+
+    if batch_state_path.exists():
+        batch_state = load_json(
+            batch_state_path
+        )
+
+        if (
+            batch_state.get(
+                "schema_version"
+            )
+            != 1
+        ):
+            raise RuntimeError(
+                "Unsupported batch_state "
+                "schema version."
+            )
+
+        expected_plan = [
+            {
+                "identifier": identifier,
+                "relative_path": str(
+                    video.relative_to(
+                        source_root
+                    )
+                ),
+            }
+            for (
+                index,
+                video,
+                identifier,
+                run_dir,
+            ) in plan
+        ]
+
+        stored_plan = [
+            {
+                "identifier":
+                    item.get("identifier"),
+                "relative_path":
+                    item.get("relative_path"),
+            }
+            for item in batch_state.get(
+                "videos",
+                [],
+            )
+        ]
+
+        if stored_plan != expected_plan:
+            raise RuntimeError(
+                "Resume batch does not match "
+                "the current input video plan."
+            )
+
+    else:
+        batch_state = new_batch_state(
+            source_root=source_root,
+            plan=plan,
+        )
+
+        write_json_atomic(
+            batch_state_path,
+            batch_state,
+        )
 
     started_at = (
         datetime.now()
@@ -624,6 +1259,27 @@ def main() -> int:
         run_dir,
     ) in plan:
 
+        if identifier in resume_items:
+            print("")
+            print("#" * 76)
+            print(
+                f"VIDEO {index:04d}/{len(plan):04d}"
+            )
+            print(video)
+            print("#" * 76)
+            print(
+                "RESUME SKIP - completed video "
+                "verified by SHA-256."
+            )
+
+            results.append(
+                resume_items[
+                    identifier
+                ]
+            )
+
+            continue
+
         print("")
         print("#" * 76)
         print(
@@ -633,6 +1289,17 @@ def main() -> int:
         print("#" * 76)
 
         try:
+            update_batch_state_video(
+                state=batch_state,
+                identifier=identifier,
+                status="running",
+            )
+
+            write_json_atomic(
+                batch_state_path,
+                batch_state,
+            )
+
             cmd = [
                 sys.executable,
                 str(
@@ -647,10 +1314,27 @@ def main() -> int:
                 str(run_dir),
             ]
 
-            if args.force:
+            if (
+                args.force
+                or (
+                    args.resume_batch
+                    and run_dir.exists()
+                )
+            ):
                 cmd.append(
                     "--force"
                 )
+
+                if (
+                    args.resume_batch
+                    and run_dir.exists()
+                    and not args.force
+                ):
+                    print(
+                        "RESUME REPROCESS - "
+                        "partial run directory will "
+                        "be replaced."
+                    )
 
             run_command(
                 cmd,
@@ -702,6 +1386,38 @@ def main() -> int:
                 item
             )
 
+            completed_manifest = load_json(
+                run_dir
+                / "run_manifest.json"
+            )
+
+            completed_sha256 = (
+                completed_manifest.get(
+                    "input",
+                    {},
+                ).get(
+                    "sha256"
+                )
+            )
+
+            if not completed_sha256:
+                raise RuntimeError(
+                    "Completed manifest SHA-256 "
+                    "is missing."
+                )
+
+            update_batch_state_video(
+                state=batch_state,
+                identifier=identifier,
+                status="completed",
+                sha256=completed_sha256,
+            )
+
+            write_json_atomic(
+                batch_state_path,
+                batch_state,
+            )
+
         except Exception as exc:
 
             failed = {
@@ -744,11 +1460,32 @@ def main() -> int:
                 failed
             )
 
+            update_batch_state_video(
+                state=batch_state,
+                identifier=identifier,
+                status="failed",
+                error=str(exc),
+            )
+
+            write_json_atomic(
+                batch_state_path,
+                batch_state,
+            )
+
             if not args.continue_on_error:
                 finished_at = (
                     datetime.now()
                     .astimezone()
                     .isoformat()
+                )
+
+                batch_state["status"] = "incomplete"
+                batch_state["finished_at"] = None
+                batch_state["updated_at"] = finished_at
+
+                write_json_atomic(
+                    batch_state_path,
+                    batch_state,
                 )
 
                 write_batch_outputs(
@@ -765,6 +1502,27 @@ def main() -> int:
         datetime.now()
         .astimezone()
         .isoformat()
+    )
+
+    if all(
+        item.get("status") == "completed"
+        for item in batch_state.get(
+            "videos",
+            [],
+        )
+    ):
+        batch_state["status"] = "completed"
+        batch_state["finished_at"] = finished_at
+
+    else:
+        batch_state["status"] = "incomplete"
+        batch_state["finished_at"] = None
+
+    batch_state["updated_at"] = finished_at
+
+    write_json_atomic(
+        batch_state_path,
+        batch_state,
     )
 
     write_batch_outputs(
