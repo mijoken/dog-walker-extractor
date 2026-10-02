@@ -1,0 +1,52 @@
+{
+  "profile_version": "1.0",
+  "camera_profile_id": "DEFINE_CAMERA_ID",
+  "enabled": false,
+  "frame_width": 1280,
+  "frame_height": 720,
+  "anchor": "person_bbox_bottom_center",
+  "target_polygon_norm": [
+    [
+      0.4,
+      0.4
+    ],
+    [
+      0.6,
+      0.4
+    ],
+    [
+      0.6,
+      0.8
+    ],
+    [
+      0.4,
+      0.8
+    ]
+  ],
+  "near_polygon_norm": [
+    [
+      0.3,
+      0.3
+    ],
+    [
+      0.7,
+      0.3
+    ],
+    [
+      0.7,
+      0.9
+    ],
+    [
+      0.3,
+      0.9
+    ]
+  ],
+  "thresholds": {
+    "approach_window_sec": 2.0,
+    "min_dwell_sec": 1.5,
+    "min_stop_sec": 1.0,
+    "stop_speed_norm_per_sec": 0.025,
+    "max_continuity_gap_sec": 0.25
+  },
+  "behavior_subject": "dog_primary_person_context"
+}
