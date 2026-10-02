@@ -16,7 +16,7 @@ REPO = Path(__file__).resolve().parents[1]
 SCRIPTS = REPO / "scripts"
 
 # ----------------------------------------------------------------------
-# FROZEN v0.1 PARAMETERS
+# OFFICIAL v0.2 PARAMETERS
 #
 # These are intentionally copied from the validated pipeline.
 # Do not change them during blind validation without creating a new
@@ -208,7 +208,7 @@ def write_zero_event_result(
 
     result = {
         "parameters": {
-            "pipeline": "frozen_v0.1",
+            "pipeline": "official_v0.2",
             "note": (
                 "No coarse dog candidate windows were produced. "
                 "Precision analysis and association were not required."
@@ -235,8 +235,8 @@ def write_zero_event_result(
 def main() -> int:
     parser = argparse.ArgumentParser(
         description=(
-            "Run the frozen Dog Walker Extractor "
-            "blind-validation pipeline."
+            "Run the official Dog Walker Extractor "
+            "v0.2 validation pipeline."
         )
     )
 
@@ -311,7 +311,7 @@ def main() -> int:
 
     print("")
     print("=" * 72)
-    print("DOG WALKER EXTRACTOR - FROZEN VALIDATION RUNNER")
+    print("DOG WALKER EXTRACTOR - OFFICIAL v0.2 VALIDATION RUNNER")
     print("=" * 72)
 
     print(f"repository     : {REPO}")
@@ -320,7 +320,7 @@ def main() -> int:
     print(f"output root    : {output_root}")
 
     print("")
-    print("FROZEN PARAMETERS")
+    print("OFFICIAL v0.2 PARAMETERS")
     print(f"model          : {MODEL}")
     print(f"scan imgsz     : {SCAN_IMGSZ}")
     print(f"scan conf      : {SCAN_CONF}")
@@ -541,13 +541,14 @@ def main() -> int:
 
     manifest = {
         "validation_id": validation_id,
-        "pipeline_version": "frozen_v0.1",
+        "pipeline_version": "official_v0.2",
         "input": {
             "path": str(input_video),
             "filename": input_video.name,
             "sha256": input_hash,
         },
         "frozen_parameters": {
+            "dog_walker_detector_version": "v0.2.0",
             "model": MODEL,
             "scan_imgsz": SCAN_IMGSZ,
             "scan_conf": SCAN_CONF,
@@ -555,6 +556,8 @@ def main() -> int:
             "precision_imgsz": PRECISION_IMGSZ,
             "precision_conf": PRECISION_CONF,
             "association": "V2",
+            "duration_saturation_sec": 2.5,
+            "persistence_saturation_sec": 3.0,
             "min_pair_score": 0.55,
             "min_pair_span_sec": 1.0,
             "min_dog_frames": 5,

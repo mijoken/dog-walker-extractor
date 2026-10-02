@@ -50,19 +50,19 @@ def main() -> int:
 
     print("")
     print("==========================================")
-    print(" FROZEN VALIDATION PIPELINE")
+    print(" OFFICIAL v0.2 VALIDATION PIPELINE")
     print("==========================================")
     print(f"root: {root}")
 
     # ----------------------------------------------------------
     # Association V2
     #
-    # Load the exact validated code used by Blind Validation 001.
+    # Load the current official v0.2 association implementation.
     # Only ROOT is redirected.
     # ----------------------------------------------------------
 
     print("")
-    print("===== FROZEN ASSOCIATION V2 =====")
+    print("===== OFFICIAL v0.2 ASSOCIATION V2 =====")
 
     association = load_module(
         "frozen_association_v2",
@@ -91,12 +91,12 @@ def main() -> int:
     # ----------------------------------------------------------
     # Event generation
     #
-    # Again load the exact validated code.
-    # Thresholds remain exactly those used in Validation 001.
+    # Load the official event generator.
+    # Event acceptance thresholds remain unchanged from v0.1.
     # ----------------------------------------------------------
 
     print("")
-    print("===== FROZEN EVENT GENERATOR =====")
+    print("===== OFFICIAL v0.2 EVENT GENERATOR =====")
 
     events = load_module(
         "frozen_event_generator",
@@ -121,7 +121,7 @@ def main() -> int:
 
     print("")
     print("==========================================")
-    print(" FROZEN VALIDATION PIPELINE COMPLETE")
+    print(" OFFICIAL v0.2 VALIDATION PIPELINE COMPLETE")
     print("==========================================")
 
     return 0
