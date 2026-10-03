@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import sys
-from pathlib import Path
+
+from app_paths import scripts_dir
 
 
-SCRIPTS = Path(__file__).resolve().parent
+SCRIPTS = scripts_dir()
 
 
 def is_frozen() -> bool:
