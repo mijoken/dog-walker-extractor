@@ -13,6 +13,11 @@ from ultralytics import YOLO
 
 DOG_CLASS_ID = 16
 
+# GUI observation only.
+# This does not participate in detection or candidate generation.
+PREVIEW_EVERY_ANALYZED = 30
+PREVIEW_WIDTH = 360
+
 
 def format_time(seconds: float) -> str:
     minutes = int(seconds // 60)
@@ -56,6 +61,12 @@ def main() -> int:
     output_dir = Path(args.output).resolve()
 
     output_dir.mkdir(parents=True, exist_ok=True)
+
+    preview_dir = output_dir / "preview"
+    preview_dir.mkdir(parents=True, exist_ok=True)
+
+    preview_path = preview_dir / "latest.png"
+    preview_temp_path = preview_dir / "latest.tmp.png"
 
     if not input_video.exists():
         raise FileNotFoundError(input_video)
@@ -141,6 +152,54 @@ def main() -> int:
                 )
 
             dog_frames += 1
+
+        # ------------------------------------------------------
+        # GUI preview output
+        #
+        # Low-frequency, reduced-size annotated frame.
+        # This is observational only and does not affect
+        # inference, scoring, windows, or event decisions.
+        # ------------------------------------------------------
+
+        if (
+            analyzed == 1
+            or analyzed % PREVIEW_EVERY_ANALYZED == 0
+        ):
+            preview = result.plot()
+
+            preview_height, preview_width = preview.shape[:2]
+
+            if preview_width > PREVIEW_WIDTH:
+                scale = PREVIEW_WIDTH / float(preview_width)
+
+                preview = cv2.resize(
+                    preview,
+                    (
+                        PREVIEW_WIDTH,
+                        max(
+                            1,
+                            int(preview_height * scale),
+                        ),
+                    ),
+                    interpolation=cv2.INTER_AREA,
+                )
+
+            ok_preview = cv2.imwrite(
+                str(preview_temp_path),
+                preview,
+                [
+                    cv2.IMWRITE_PNG_COMPRESSION,
+                    3,
+                ],
+            )
+
+            if ok_preview:
+                try:
+                    preview_temp_path.replace(
+                        preview_path
+                    )
+                except OSError:
+                    pass
 
         if analyzed % 300 == 0:
             elapsed = time.perf_counter() - started
@@ -239,6 +298,11 @@ def main() -> int:
             "fps": fps,
             "total_frames": total_frames,
             "duration_sec": duration_sec,
+        },
+        "preview": {
+            "path": str(preview_path),
+            "every_analyzed_frames": PREVIEW_EVERY_ANALYZED,
+            "width": PREVIEW_WIDTH,
         },
         "scan": {
             "analyzed_frames": analyzed,

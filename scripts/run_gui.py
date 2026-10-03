@@ -11,6 +11,8 @@ import sys
 import threading
 import winsound
 from datetime import datetime
+
+from app_runtime import build_script_command
 from pathlib import Path
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
@@ -2043,13 +2045,9 @@ class DogWalkerApp(tk.Tk):
         self.candidate_count = 0
         self.candidate_index = 0
 
-        cmd = [
-            sys.executable,
-            str(
-                SCRIPTS
-                / "run_folder_pipeline.py"
-            ),
-        ]
+        cmd = build_script_command(
+            "run_folder_pipeline.py"
+        )
 
         if input_mode == "files":
             self.last_batch_dir.mkdir(

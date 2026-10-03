@@ -9,6 +9,7 @@ import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
+from app_runtime import build_script_command
 
 
 REPO = Path(__file__).resolve().parents[1]
@@ -2071,19 +2072,15 @@ def main() -> int:
                 batch_state,
             )
 
-            cmd = [
-                sys.executable,
-                str(
-                    SCRIPTS
-                    / "validation_runner.py"
-                ),
+            cmd = build_script_command(
+                "validation_runner.py",
                 "--input",
                 str(video),
                 "--validation-id",
                 identifier,
                 "--output-root",
                 str(run_dir),
-            ]
+            )
 
             if (
                 args.force
@@ -2123,12 +2120,8 @@ def main() -> int:
                 )
 
                 run_command(
-                    [
-                        sys.executable,
-                        str(
-                            SCRIPTS
-                            / "analyze_roi_behavior.py"
-                        ),
+                    build_script_command(
+                        "analyze_roi_behavior.py",
                         "--root",
                         str(
                             precision_root
@@ -2137,7 +2130,7 @@ def main() -> int:
                         str(
                             roi_profile
                         ),
-                    ],
+                    ),
                     (
                         f"ROI ANALYSIS "
                         f"VIDEO {index:04d}"
