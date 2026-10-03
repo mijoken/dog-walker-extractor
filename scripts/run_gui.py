@@ -12,6 +12,7 @@ import threading
 import winsound
 from datetime import datetime
 
+from app_paths import assets_dir, default_output_dir
 from app_runtime import build_script_command
 from pathlib import Path
 import tkinter as tk
@@ -19,9 +20,8 @@ from tkinter import filedialog, messagebox, ttk
 
 
 REPO = Path(__file__).resolve().parents[1]
-SCRIPTS = REPO / "scripts"
-ASSETS = REPO / "assets"
-DEFAULT_OUTPUT = REPO / "output" / "app_runs"
+ASSETS = assets_dir()
+DEFAULT_OUTPUT = default_output_dir()
 
 APP_NAME = "Dog Walker Extractor"
 APP_VERSION = "0.3.0"
