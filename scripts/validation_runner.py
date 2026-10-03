@@ -11,6 +11,8 @@ from pathlib import Path
 
 import imageio_ffmpeg
 
+from app_runtime import build_script_command
+
 
 REPO = Path(__file__).resolve().parents[1]
 SCRIPTS = REPO / "scripts"
@@ -390,9 +392,8 @@ def main() -> int:
     # ==============================================================
 
     run_command(
-        [
-            sys.executable,
-            str(SCRIPTS / "scan_dogs.py"),
+        build_script_command(
+            "scan_dogs.py",
             "--input",
             str(input_video),
             "--output",
@@ -405,7 +406,7 @@ def main() -> int:
             str(SCAN_CONF),
             "--stride",
             str(SCAN_STRIDE),
-        ],
+        ),
         "STAGE 1 - FROZEN COARSE DOG SCAN",
     )
 
@@ -455,12 +456,8 @@ def main() -> int:
         # ==========================================================
 
         run_command(
-            [
-                sys.executable,
-                str(
-                    SCRIPTS
-                    / "analyze_candidates.py"
-                ),
+            build_script_command(
+                "analyze_candidates.py",
                 "--input",
                 str(input_video),
                 "--scan-summary",
@@ -473,7 +470,7 @@ def main() -> int:
                 str(PRECISION_IMGSZ),
                 "--conf",
                 str(PRECISION_CONF),
-            ],
+            ),
             "STAGE 2 - FROZEN PRECISION ANALYSIS",
         )
 
@@ -483,15 +480,11 @@ def main() -> int:
         # ==========================================================
 
         run_command(
-            [
-                sys.executable,
-                str(
-                    SCRIPTS
-                    / "audit_track_quality_param.py"
-                ),
+            build_script_command(
+                "audit_track_quality_param.py",
                 "--root",
                 str(precision_dir),
-            ],
+            ),
             "STAGE 3 - TRACK QUALITY AUDIT",
         )
 
@@ -501,15 +494,11 @@ def main() -> int:
         # ==========================================================
 
         run_command(
-            [
-                sys.executable,
-                str(
-                    SCRIPTS
-                    / "run_frozen_validation.py"
-                ),
+            build_script_command(
+                "run_frozen_validation.py",
                 "--root",
                 str(precision_dir),
-            ],
+            ),
             (
                 "STAGE 4/5 - FROZEN ASSOCIATION "
                 "AND EVENT GENERATION"
