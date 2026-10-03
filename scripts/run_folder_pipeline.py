@@ -172,6 +172,346 @@ def new_batch_state(
     }
 
 
+def new_files_batch_state(
+    *,
+    entries: list[dict],
+    plan: list[tuple],
+) -> dict:
+    if len(entries) != len(plan):
+        raise RuntimeError(
+            "Files batch_state entries / plan "
+            "length mismatch."
+        )
+
+    now = (
+        datetime.now()
+        .astimezone()
+        .isoformat()
+    )
+
+    videos = []
+
+    for entry, plan_item in zip(
+        entries,
+        plan,
+        strict=True,
+    ):
+        (
+            index,
+            video,
+            identifier,
+            run_dir,
+        ) = plan_item
+
+        source_path = Path(
+            entry["source_path"]
+        ).resolve()
+
+        if source_path != video.resolve():
+            raise RuntimeError(
+                "Files batch_state source_path "
+                "does not match plan."
+            )
+
+        videos.append(
+            {
+                "index": index,
+                "entry_id": entry["entry_id"],
+                "identifier": identifier,
+                "logical_path":
+                    entry["logical_path"],
+                "source_path": str(video),
+                "run_dir": str(run_dir),
+                "status": "pending",
+                "sha256": None,
+                "started_at": None,
+                "finished_at": None,
+                "error": None,
+            }
+        )
+
+    return {
+        "schema_version": 2,
+        "pipeline":
+            "dog_walker_folder_pipeline",
+        "input_mode": "files",
+        "created_at": now,
+        "updated_at": now,
+        "status": "running",
+        "videos": videos,
+    }
+
+
+def validate_files_batch_state(
+    *,
+    state: dict,
+    entries: list[dict],
+    plan: list[tuple],
+) -> None:
+    if state.get("schema_version") != 2:
+        raise RuntimeError(
+            "Files batch_state requires "
+            "schema_version 2."
+        )
+
+    if state.get("input_mode") != "files":
+        raise RuntimeError(
+            "Files batch_state input_mode "
+            "must be 'files'."
+        )
+
+    stored_videos = state.get("videos")
+
+    if not isinstance(stored_videos, list):
+        raise RuntimeError(
+            "Files batch_state videos "
+            "must be a list."
+        )
+
+    if (
+        len(stored_videos) != len(entries)
+        or len(entries) != len(plan)
+    ):
+        raise RuntimeError(
+            "Files batch_state plan length "
+            "does not match current selection."
+        )
+
+    for stored, entry, plan_item in zip(
+        stored_videos,
+        entries,
+        plan,
+        strict=True,
+    ):
+        (
+            index,
+            _video,
+            identifier,
+            _run_dir,
+        ) = plan_item
+
+        if stored.get("index") != index:
+            raise RuntimeError(
+                "Files batch_state index "
+                "does not match current plan."
+            )
+
+        if (
+            stored.get("entry_id")
+            != entry["entry_id"]
+        ):
+            raise RuntimeError(
+                "Files batch_state entry_id "
+                "does not match current plan."
+            )
+
+        stored_logical = (
+            canonical_files_logical_path(
+                stored.get("logical_path")
+            )
+        )
+
+        if stored_logical != entry["logical_path"]:
+            raise RuntimeError(
+                "Files batch_state logical_path "
+                "does not match current plan."
+            )
+
+        if stored.get("identifier") != identifier:
+            raise RuntimeError(
+                "Files batch_state identifier "
+                "does not match current plan."
+            )
+
+
+def sync_files_batch_state_sources(
+    *,
+    state: dict,
+    entries: list[dict],
+    plan: list[tuple],
+) -> bool:
+    validate_files_batch_state(
+        state=state,
+        entries=entries,
+        plan=plan,
+    )
+
+    stored_videos = state["videos"]
+    changed = False
+
+    for stored, entry, plan_item in zip(
+        stored_videos,
+        entries,
+        plan,
+        strict=True,
+    ):
+        (
+            _index,
+            video,
+            _identifier,
+            run_dir,
+        ) = plan_item
+
+        current_source = str(
+            Path(entry["source_path"]).resolve()
+        )
+        current_run_dir = str(
+            run_dir.resolve()
+        )
+
+        if stored.get("source_path") != current_source:
+            stored["source_path"] = current_source
+            changed = True
+
+        if stored.get("run_dir") != current_run_dir:
+            stored["run_dir"] = current_run_dir
+            changed = True
+
+        if video.resolve() != Path(
+            current_source
+        ).resolve():
+            raise RuntimeError(
+                "Files batch_state source sync "
+                "does not match current plan."
+            )
+
+    if changed:
+        state["updated_at"] = (
+            datetime.now()
+            .astimezone()
+            .isoformat()
+        )
+
+    return changed
+
+
+def load_or_create_batch_state(
+    *,
+    state_path: Path,
+    input_mode: str,
+    plan: list[tuple],
+    source_root: Path | None = None,
+    entries: list[dict] | None = None,
+) -> dict:
+    if input_mode not in {
+        "folder",
+        "files",
+    }:
+        raise RuntimeError(
+            f"Unsupported input_mode: {input_mode}"
+        )
+
+    if state_path.exists():
+        state = load_json(state_path)
+
+        if input_mode == "folder":
+            if state.get("schema_version") != 1:
+                raise RuntimeError(
+                    "Folder batch_state requires "
+                    "schema_version 1."
+                )
+
+            if source_root is None:
+                raise RuntimeError(
+                    "Folder batch_state requires "
+                    "source_root."
+                )
+
+            expected_plan = []
+
+            for (
+                _index,
+                video,
+                identifier,
+                _run_dir,
+            ) in plan:
+                expected_plan.append(
+                    {
+                        "identifier": identifier,
+                        "relative_path": str(
+                            video.relative_to(
+                                source_root
+                            )
+                        ),
+                    }
+                )
+
+            stored_plan = [
+                {
+                    "identifier":
+                        item.get("identifier"),
+                    "relative_path":
+                        item.get("relative_path"),
+                }
+                for item in state.get(
+                    "videos",
+                    [],
+                )
+            ]
+
+            if stored_plan != expected_plan:
+                raise RuntimeError(
+                    "Stored folder batch_state "
+                    "plan does not match current plan."
+                )
+
+            return state
+
+        if entries is None:
+            raise RuntimeError(
+                "Files batch_state requires entries."
+            )
+
+        validate_files_batch_state(
+            state=state,
+            entries=entries,
+            plan=plan,
+        )
+
+        changed = sync_files_batch_state_sources(
+            state=state,
+            entries=entries,
+            plan=plan,
+        )
+
+        if changed:
+            write_json_atomic(
+                state_path,
+                state,
+            )
+
+        return state
+
+    if input_mode == "folder":
+        if source_root is None:
+            raise RuntimeError(
+                "Folder batch_state requires "
+                "source_root."
+            )
+
+        state = new_batch_state(
+            source_root=source_root,
+            plan=plan,
+        )
+    else:
+        if entries is None:
+            raise RuntimeError(
+                "Files batch_state requires entries."
+            )
+
+        state = new_files_batch_state(
+            entries=entries,
+            plan=plan,
+        )
+
+    write_json_atomic(
+        state_path,
+        state,
+    )
+
+    return state
+
+
 def update_batch_state_video(
     *,
     state: dict,
@@ -324,6 +664,83 @@ def manifest_completion_proof(
         )
 
 
+def resume_decision_for_video(
+    *,
+    video: Path,
+    run_dir: Path,
+    state_video: dict | None,
+) -> tuple[str, str]:
+    if state_video is None:
+        return (
+            "REPROCESS",
+            "state entry missing",
+        )
+
+    status = state_video.get("status")
+
+    if status != "completed":
+        return (
+            "REPROCESS",
+            f"state status is {status!r}",
+        )
+
+    state_sha256 = state_video.get(
+        "sha256"
+    )
+
+    if (
+        not isinstance(
+            state_sha256,
+            str,
+        )
+        or not state_sha256
+    ):
+        return (
+            "REPROCESS",
+            "state SHA-256 missing",
+        )
+
+    (
+        proof_ok,
+        manifest_sha256,
+        proof_reason,
+    ) = manifest_completion_proof(
+        video=video,
+        run_dir=run_dir,
+    )
+
+    if not proof_ok:
+        return (
+            "REPROCESS",
+            proof_reason,
+        )
+
+    if manifest_sha256 != state_sha256:
+        return (
+            "REPROCESS",
+            "batch_state / manifest "
+            "SHA-256 mismatch",
+        )
+
+    current_sha256 = file_sha256(
+        video
+    )
+
+    if current_sha256 != manifest_sha256:
+        return (
+            "REPROCESS",
+            "current file SHA-256 changed",
+        )
+
+    return (
+        "SKIP",
+        "completed state and "
+        "SHA-256 verified",
+    )
+
+
+
+
 def discover_videos(root: Path) -> list[Path]:
     videos = []
 
@@ -342,6 +759,381 @@ def discover_videos(root: Path) -> list[Path]:
     )
 
     return videos
+
+
+
+def canonical_files_logical_path(
+    value: str,
+) -> str:
+    if (
+        not isinstance(
+            value,
+            str,
+        )
+        or not value.strip()
+    ):
+        raise RuntimeError(
+            "logical_path must be "
+            "a non-empty string."
+        )
+
+    logical_path = (
+        value.strip()
+        .replace(
+            "\\",
+            "/",
+        )
+    )
+
+    if logical_path.startswith("/"):
+        raise RuntimeError(
+            "logical_path must be relative: "
+            f"{value}"
+        )
+
+    if ":" in logical_path:
+        raise RuntimeError(
+            "logical_path must not contain "
+            "a drive or URI prefix: "
+            f"{value}"
+        )
+
+    parts = logical_path.split("/")
+
+    if any(
+        part in {
+            "",
+            ".",
+            "..",
+        }
+        for part in parts
+    ):
+        raise RuntimeError(
+            "logical_path contains an "
+            "invalid path component: "
+            f"{value}"
+        )
+
+    return "/".join(
+        parts
+    ).casefold()
+
+
+def load_files_manifest(
+    manifest_path: Path,
+) -> list[dict]:
+    manifest_path = (
+        manifest_path.resolve()
+    )
+
+    if not manifest_path.exists():
+        raise FileNotFoundError(
+            manifest_path
+        )
+
+    if not manifest_path.is_file():
+        raise RuntimeError(
+            "Input manifest is not a file: "
+            f"{manifest_path}"
+        )
+
+    data = load_json(
+        manifest_path
+    )
+
+    if not isinstance(
+        data,
+        dict,
+    ):
+        raise RuntimeError(
+            "Input manifest root "
+            "must be an object."
+        )
+
+    if (
+        data.get("schema_version")
+        != 2
+    ):
+        raise RuntimeError(
+            "Structured files mode requires "
+            "schema_version 2."
+        )
+
+    if (
+        data.get("input_mode")
+        != "files"
+    ):
+        raise RuntimeError(
+            "Input manifest input_mode "
+            "must be 'files'."
+        )
+
+    values = data.get(
+        "files"
+    )
+
+    if not isinstance(
+        values,
+        list,
+    ):
+        raise RuntimeError(
+            "Input manifest files "
+            "must be a list."
+        )
+
+    if not values:
+        raise RuntimeError(
+            "Input manifest contains "
+            "no files."
+        )
+
+    entries = []
+
+    seen_entry_ids = set()
+    seen_logical_paths = set()
+    seen_source_paths = set()
+
+    for index, value in enumerate(
+        values,
+        start=1,
+    ):
+        if not isinstance(
+            value,
+            dict,
+        ):
+            raise RuntimeError(
+                "Input manifest file "
+                f"entry {index} must be "
+                "an object."
+            )
+
+        entry_id = value.get(
+            "entry_id"
+        )
+
+        if (
+            not isinstance(
+                entry_id,
+                str,
+            )
+            or not entry_id.strip()
+        ):
+            raise RuntimeError(
+                "entry_id must be a "
+                "non-empty string."
+            )
+
+        entry_id = entry_id.strip()
+
+        if not re.fullmatch(
+            r"[A-Za-z0-9._-]+",
+            entry_id,
+        ):
+            raise RuntimeError(
+                "Invalid entry_id: "
+                f"{entry_id}"
+            )
+
+        entry_key = (
+            entry_id.casefold()
+        )
+
+        if (
+            entry_key
+            in seen_entry_ids
+        ):
+            raise RuntimeError(
+                "Duplicate entry_id: "
+                f"{entry_id}"
+            )
+
+        logical_path = (
+            canonical_files_logical_path(
+                value.get(
+                    "logical_path"
+                )
+            )
+        )
+
+        if (
+            logical_path
+            in seen_logical_paths
+        ):
+            raise RuntimeError(
+                "Duplicate logical_path: "
+                f"{logical_path}"
+            )
+
+        source_value = value.get(
+            "source_path"
+        )
+
+        if (
+            not isinstance(
+                source_value,
+                str,
+            )
+            or not source_value.strip()
+        ):
+            raise RuntimeError(
+                "source_path must be a "
+                "non-empty string."
+            )
+
+        video = Path(
+            source_value
+        ).resolve()
+
+        if not video.exists():
+            raise FileNotFoundError(
+                video
+            )
+
+        if not video.is_file():
+            raise RuntimeError(
+                "Selected video is "
+                "not a file: "
+                f"{video}"
+            )
+
+        if (
+            video.suffix.lower()
+            not in VIDEO_EXTENSIONS
+        ):
+            raise RuntimeError(
+                "Unsupported selected "
+                "video extension: "
+                f"{video}"
+            )
+
+        source_key = str(
+            video
+        ).casefold()
+
+        if (
+            source_key
+            in seen_source_paths
+        ):
+            raise RuntimeError(
+                "Duplicate source_path: "
+                f"{video}"
+            )
+
+        seen_entry_ids.add(
+            entry_key
+        )
+
+        seen_logical_paths.add(
+            logical_path
+        )
+
+        seen_source_paths.add(
+            source_key
+        )
+
+        entries.append(
+            {
+                "entry_id": entry_id,
+                "logical_path": logical_path,
+                "source_path": video,
+            }
+        )
+
+    return entries
+
+
+def build_files_plan(
+    *,
+    entries: list[dict],
+    batch_dir: Path,
+) -> list[tuple]:
+    plan = []
+
+    for index, entry in enumerate(
+        entries,
+        start=1,
+    ):
+        video = entry[
+            "source_path"
+        ]
+
+        logical_path = entry[
+            "logical_path"
+        ]
+
+        logical_hash = hashlib.sha1(
+            logical_path.encode(
+                "utf-8",
+                errors="replace",
+            )
+        ).hexdigest()[:8]
+
+        identifier = (
+            f"{index:04d}_"
+            f"{safe_name(
+                Path(logical_path).stem
+            )}_"
+            f"{logical_hash}"
+        )
+
+        run_dir = (
+            batch_dir
+            / "videos"
+            / identifier
+        )
+
+        # Keep the existing four-item plan
+        # contract intact. Structured identity
+        # remains in entries for schema-v2 state.
+        plan.append(
+            (
+                index,
+                video,
+                identifier,
+                run_dir,
+            )
+        )
+
+    return plan
+
+
+def build_video_plan(
+    *,
+    videos: list[Path],
+    source_root: Path,
+    batch_dir: Path,
+) -> list[tuple]:
+    plan = []
+
+    for index, video in enumerate(
+        videos,
+        start=1,
+    ):
+        relative = video.relative_to(
+            source_root
+        )
+
+        identifier = (
+            f"{index:04d}_"
+            f"{safe_name(video.stem)}_"
+            f"{short_path_hash(relative)}"
+        )
+
+        run_dir = (
+            batch_dir
+            / identifier
+        )
+
+        plan.append(
+            (
+                index,
+                video,
+                identifier,
+                run_dir,
+            )
+        )
+
+    return plan
 
 
 def validate_roi_profile(
@@ -644,9 +1436,19 @@ def main() -> int:
 
     parser.add_argument(
         "--input",
-        required=True,
+        required=False,
         help=(
             "Input folder or SD-card root."
+        ),
+    )
+    parser.add_argument(
+        "--input-manifest",
+        help=(
+            "JSON manifest containing "
+            "an explicit ordered "
+            "video-file selection. "
+            "Phase 4H supports files "
+            "mode with --plan only."
         ),
     )
 
@@ -725,18 +1527,48 @@ def main() -> int:
 
     args = parser.parse_args()
 
-    source_root = Path(
+    if bool(
         args.input
-    ).resolve()
-
-    if not source_root.exists():
-        raise FileNotFoundError(
-            source_root
+    ) == bool(
+        args.input_manifest
+    ):
+        raise RuntimeError(
+            "Specify exactly one of "
+            "--input or "
+            "--input-manifest."
         )
 
-    if not source_root.is_dir():
-        raise NotADirectoryError(
-            source_root
+    input_mode = (
+        "files"
+        if args.input_manifest
+        else "folder"
+    )
+
+    source_root = None
+    selected_entries = None
+
+    if input_mode == "folder":
+        source_root = Path(
+            args.input
+        ).resolve()
+
+        if not source_root.exists():
+            raise FileNotFoundError(
+                source_root
+            )
+
+        if not source_root.is_dir():
+            raise NotADirectoryError(
+                source_root
+            )
+
+    else:
+        selected_entries = (
+            load_files_manifest(
+                Path(
+                    args.input_manifest
+                )
+            )
         )
 
     output_root = Path(
@@ -759,9 +1591,15 @@ def main() -> int:
             roi_profile
         )
 
-    videos = discover_videos(
-        source_root
-    )
+    if input_mode == "folder":
+        videos = discover_videos(
+            source_root
+        )
+    else:
+        videos = [
+            entry["source_path"]
+            for entry in selected_entries
+        ]
 
     print("")
     print("=" * 76)
@@ -771,9 +1609,15 @@ def main() -> int:
     )
     print("=" * 76)
 
-    print(
-        f"input root : {source_root}"
-    )
+    if input_mode == "folder":
+        print(
+            f"input root : "
+            f"{source_root}"
+        )
+    else:
+        print(
+            "input mode : explicit files"
+        )
 
     print(
         f"videos     : {len(videos)}"
@@ -832,34 +1676,16 @@ def main() -> int:
         f"batch dir  : {batch_dir}"
     )
 
-    plan = []
-
-    for index, video in enumerate(
-        videos,
-        start=1,
-    ):
-        relative = video.relative_to(
-            source_root
+    if input_mode == "folder":
+        plan = build_video_plan(
+            videos=videos,
+            source_root=source_root,
+            batch_dir=batch_dir,
         )
-
-        identifier = (
-            f"{index:04d}_"
-            f"{safe_name(video.stem)}_"
-            f"{short_path_hash(relative)}"
-        )
-
-        run_dir = (
-            batch_dir
-            / identifier
-        )
-
-        plan.append(
-            (
-                index,
-                video,
-                identifier,
-                run_dir,
-            )
+    else:
+        plan = build_files_plan(
+            entries=selected_entries,
+            batch_dir=batch_dir,
         )
 
     print("")
@@ -1181,68 +2007,13 @@ def main() -> int:
         / "batch_state.json"
     )
 
-    if batch_state_path.exists():
-        batch_state = load_json(
-            batch_state_path
-        )
-
-        if (
-            batch_state.get(
-                "schema_version"
-            )
-            != 1
-        ):
-            raise RuntimeError(
-                "Unsupported batch_state "
-                "schema version."
-            )
-
-        expected_plan = [
-            {
-                "identifier": identifier,
-                "relative_path": str(
-                    video.relative_to(
-                        source_root
-                    )
-                ),
-            }
-            for (
-                index,
-                video,
-                identifier,
-                run_dir,
-            ) in plan
-        ]
-
-        stored_plan = [
-            {
-                "identifier":
-                    item.get("identifier"),
-                "relative_path":
-                    item.get("relative_path"),
-            }
-            for item in batch_state.get(
-                "videos",
-                [],
-            )
-        ]
-
-        if stored_plan != expected_plan:
-            raise RuntimeError(
-                "Resume batch does not match "
-                "the current input video plan."
-            )
-
-    else:
-        batch_state = new_batch_state(
-            source_root=source_root,
-            plan=plan,
-        )
-
-        write_json_atomic(
-            batch_state_path,
-            batch_state,
-        )
+    batch_state = load_or_create_batch_state(
+        state_path=batch_state_path,
+        input_mode=input_mode,
+        plan=plan,
+        source_root=source_root,
+        entries=selected_entries,
+    )
 
     started_at = (
         datetime.now()

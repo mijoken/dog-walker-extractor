@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import cv2
 import json
 import hashlib
 import os
@@ -8,6 +9,7 @@ import re
 import subprocess
 import sys
 import threading
+import winsound
 from datetime import datetime
 from pathlib import Path
 import tkinter as tk
@@ -20,7 +22,7 @@ ASSETS = REPO / "assets"
 DEFAULT_OUTPUT = REPO / "output" / "app_runs"
 
 APP_NAME = "Dog Walker Extractor"
-APP_VERSION = "0.2.4"
+APP_VERSION = "0.3.0"
 APP_AUTHOR = "Kentaro.M"
 APP_EDITION = "BLUE HARBOR TOWER MINATOMIRAI Edition"
 
@@ -57,6 +59,13 @@ class DogWalkerApp(tk.Tk):
         self.preview_image = None
 
         self.input_var = tk.StringVar()
+        self.input_mode_var = tk.StringVar(
+            value="files"
+        )
+        self.selected_files: list[Path] = []
+        self.input_summary_var = tk.StringVar(
+            value="動画ファイルを選択してください"
+        )
         self.output_var = tk.StringVar(
             value=str(DEFAULT_OUTPUT)
         )
@@ -227,7 +236,7 @@ class DogWalkerApp(tk.Tk):
         tk.Label(
             left,
             text=(
-                "SDカードまたは動画フォルダから、"
+                "動画ファイルまたはフォルダから、"
                 "犬連れ歩行イベント候補を自動抽出します。"
             ),
             bg=HEADER_BG,
@@ -318,21 +327,110 @@ class DogWalkerApp(tk.Tk):
         ).grid(
             row=0,
             column=0,
-            columnspan=3,
             sticky=tk.W,
-            pady=(0, 5),
+            pady=(0, 3),
+        )
+
+        card.grid_columnconfigure(
+            0,
+            weight=0,
+            minsize=240,
+        )
+        card.grid_columnconfigure(
+            1,
+            weight=1,
+        )
+
+        mode_frame = tk.Frame(
+            card,
+            bg=CARD_BG,
+        )
+        mode_frame.grid(
+            row=1,
+            column=0,
+            sticky=tk.NW,
+            padx=(0, 24),
+        )
+
+        tk.Label(
+            mode_frame,
+            text="入力方法",
+            bg=CARD_BG,
+            fg=TEXT,
+            font=(
+                "Segoe UI",
+                9,
+                "bold",
+            ),
+        ).pack(
+            anchor=tk.W,
+            pady=(0, 2),
+        )
+
+        tk.Radiobutton(
+            mode_frame,
+            text="動画ファイル",
+            variable=self.input_mode_var,
+            value="files",
+            command=self._on_input_mode_changed,
+            bg=CARD_BG,
+            fg=TEXT,
+        ).pack(
+            anchor=tk.W,
+        )
+
+        tk.Radiobutton(
+            mode_frame,
+            text="フォルダ",
+            variable=self.input_mode_var,
+            value="folder",
+            command=self._on_input_mode_changed,
+            bg=CARD_BG,
+            fg=TEXT,
+        ).pack(
+            anchor=tk.W,
+        )
+
+        paths_frame = tk.Frame(
+            card,
+            bg=CARD_BG,
+        )
+        paths_frame.grid(
+            row=0,
+            column=1,
+            rowspan=2,
+            sticky=tk.NSEW,
+        )
+
+        paths_frame.grid_columnconfigure(
+            1,
+            weight=1,
         )
 
         self._path_row(
-            card,
-            row=1,
-            label="SDカード / 動画フォルダ",
+            paths_frame,
+            row=0,
+            label="解析対象",
             variable=self.input_var,
             command=self._choose_input,
         )
 
+        tk.Label(
+            paths_frame,
+            textvariable=self.input_summary_var,
+            bg=CARD_BG,
+            fg=MUTED,
+            anchor="w",
+        ).grid(
+            row=1,
+            column=1,
+            columnspan=2,
+            sticky=tk.W,
+            pady=(1, 3),
+        )
+
         self._path_row(
-            card,
+            paths_frame,
             row=2,
             label="保存先フォルダ",
             variable=self.output_var,
@@ -942,29 +1040,190 @@ class DogWalkerApp(tk.Tk):
             )
             return
 
-        input_path = Path(
-            input_text
-        )
-
-        if (
-            input_path.exists()
-            and input_path.is_dir()
-        ):
-            self.start_button.configure(
-                state=tk.NORMAL,
+        if self.input_mode_var.get() == "files":
+            valid_input = bool(
+                self.selected_files
+            ) and all(
+                path.exists()
+                and path.is_file()
+                for path in self.selected_files
             )
         else:
-            self.start_button.configure(
-                state=tk.DISABLED,
+            input_path = Path(
+                input_text
+            )
+            valid_input = (
+                input_path.exists()
+                and input_path.is_dir()
             )
 
-    def _choose_input(self) -> None:
-        path = filedialog.askdirectory(
-            title="SDカードまたは動画フォルダを選択",
+        self.start_button.configure(
+            state=(
+                tk.NORMAL
+                if valid_input
+                else tk.DISABLED
+            ),
         )
 
-        if path:
-            self.input_var.set(path)
+    def _on_input_mode_changed(self) -> None:
+        self.selected_files = []
+        self.input_var.set("")
+
+        if self.input_mode_var.get() == "files":
+            self.input_summary_var.set(
+                "動画ファイルを選択してください"
+            )
+        else:
+            self.input_summary_var.set(
+                "動画フォルダを選択してください"
+            )
+
+        self._refresh_start_button_state()
+
+    @staticmethod
+    def _video_duration_seconds(
+        video_path: Path,
+    ) -> float | None:
+        capture = cv2.VideoCapture(
+            str(video_path)
+        )
+
+        try:
+            if not capture.isOpened():
+                return None
+
+            fps = capture.get(
+                cv2.CAP_PROP_FPS
+            )
+            frame_count = capture.get(
+                cv2.CAP_PROP_FRAME_COUNT
+            )
+
+            if fps <= 0 or frame_count < 0:
+                return None
+
+            return frame_count / fps
+        finally:
+            capture.release()
+
+    @staticmethod
+    def _format_duration(
+        total_seconds: float,
+    ) -> str:
+        seconds = max(
+            0,
+            int(round(total_seconds)),
+        )
+
+        hours, remainder = divmod(
+            seconds,
+            3600,
+        )
+        minutes, seconds = divmod(
+            remainder,
+            60,
+        )
+
+        if hours:
+            return (
+                f"{hours}時間"
+                f"{minutes:02d}分"
+                f"{seconds:02d}秒"
+            )
+
+        return (
+            f"{minutes}分"
+            f"{seconds:02d}秒"
+        )
+
+    def _choose_input(self) -> None:
+        if self.input_mode_var.get() == "files":
+            paths = filedialog.askopenfilenames(
+                title="解析する動画ファイルを選択",
+                filetypes=[
+                    (
+                        "Video files",
+                        (
+                            "*.mp4",
+                            "*.mov",
+                            "*.avi",
+                            "*.mkv",
+                            "*.mts",
+                            "*.m2ts",
+                        ),
+                    ),
+                    ("All files", "*.*"),
+                ],
+            )
+
+            if paths:
+                self.selected_files = [
+                    Path(path).resolve()
+                    for path in paths
+                ]
+
+                if len(self.selected_files) == 1:
+                    self.input_var.set(
+                        str(self.selected_files[0])
+                    )
+                else:
+                    self.input_var.set(
+                        f"{len(self.selected_files)}個の動画ファイル"
+                    )
+
+                durations = [
+                    self._video_duration_seconds(
+                        video_path
+                    )
+                    for video_path
+                    in self.selected_files
+                ]
+
+                known_durations = [
+                    duration
+                    for duration in durations
+                    if duration is not None
+                ]
+
+                if (
+                    known_durations
+                    and len(known_durations)
+                    == len(self.selected_files)
+                ):
+                    total_duration = sum(
+                        known_durations
+                    )
+
+                    self.input_summary_var.set(
+                        (
+                            f"選択動画数："
+                            f"{len(self.selected_files)}本"
+                            " ｜ 合計再生時間："
+                            f"{self._format_duration(total_duration)}"
+                        )
+                    )
+                else:
+                    self.input_summary_var.set(
+                        (
+                            f"選択動画数："
+                            f"{len(self.selected_files)}本"
+                            " ｜ 合計再生時間：取得できません"
+                        )
+                    )
+
+        else:
+            path = filedialog.askdirectory(
+                title="SDカードまたは動画フォルダを選択",
+            )
+
+            if path:
+                self.selected_files = []
+                self.input_var.set(path)
+                self.input_summary_var.set(
+                    "フォルダ一括処理"
+                )
+
+        self._refresh_start_button_state()
 
     def _choose_output(self) -> None:
         path = filedialog.askdirectory(
@@ -1682,27 +1941,54 @@ class DogWalkerApp(tk.Tk):
             )
             return
 
-        input_dir = Path(
-            input_text
-        )
+        input_mode = self.input_mode_var.get()
+
+        input_dir = None
+
+        if input_mode == "files":
+            if not self.selected_files:
+                messagebox.showerror(
+                    "入力エラー",
+                    "解析する動画ファイルを選択してください。",
+                )
+                return
+
+            for video_path in self.selected_files:
+                if (
+                    not video_path.exists()
+                    or not video_path.is_file()
+                ):
+                    messagebox.showerror(
+                        "入力エラー",
+                        (
+                            "選択した動画ファイルが"
+                            "見つかりません。\n"
+                            f"{video_path}"
+                        ),
+                    )
+                    return
+        else:
+            input_dir = Path(
+                input_text
+            )
+
+            if not input_dir.exists():
+                messagebox.showerror(
+                    "入力エラー",
+                    "指定した入力フォルダが存在しません。",
+                )
+                return
+
+            if not input_dir.is_dir():
+                messagebox.showerror(
+                    "入力エラー",
+                    "入力先はフォルダを指定してください。",
+                )
+                return
 
         output_dir = Path(
             output_text
         )
-
-        if not input_dir.exists():
-            messagebox.showerror(
-                "入力エラー",
-                "指定した入力フォルダが存在しません。",
-            )
-            return
-
-        if not input_dir.is_dir():
-            messagebox.showerror(
-                "入力エラー",
-                "入力先はフォルダを指定してください。",
-            )
-            return
 
         output_dir.mkdir(
             parents=True,
@@ -1711,27 +1997,28 @@ class DogWalkerApp(tk.Tk):
 
         resume_batch = None
 
-        resume_candidate = (
-            self._find_resume_candidate(
-                input_dir=input_dir,
-                output_dir=output_dir,
-            )
-        )
-
-        if resume_candidate is not None:
-            resume_choice = (
-                self._ask_resume_choice(
-                    resume_candidate
+        if input_mode == "folder":
+            resume_candidate = (
+                self._find_resume_candidate(
+                    input_dir=input_dir,
+                    output_dir=output_dir,
                 )
             )
 
-            if resume_choice is None:
-                return
-
-            if resume_choice:
-                resume_batch = (
-                    resume_candidate
+            if resume_candidate is not None:
+                resume_choice = (
+                    self._ask_resume_choice(
+                        resume_candidate
+                    )
                 )
+
+                if resume_choice is None:
+                    return
+
+                if resume_choice:
+                    resume_batch = (
+                        resume_candidate
+                    )
 
         batch_id = (
             datetime.now()
@@ -1762,14 +2049,66 @@ class DogWalkerApp(tk.Tk):
                 SCRIPTS
                 / "run_folder_pipeline.py"
             ),
-            "--input",
-            str(input_dir),
+        ]
+
+        if input_mode == "files":
+            self.last_batch_dir.mkdir(
+                parents=True,
+                exist_ok=True,
+            )
+
+            manifest_path = (
+                self.last_batch_dir
+                / "input_manifest.json"
+            )
+
+            manifest = {
+                "schema_version": 2,
+                "input_mode": "files",
+                "files": [
+                    {
+                        "entry_id": f"item-{index:04d}",
+                        "logical_path": (
+                            video_path.name
+                        ),
+                        "source_path": str(
+                            video_path
+                        ),
+                    }
+                    for index, video_path
+                    in enumerate(
+                        self.selected_files,
+                        start=1,
+                    )
+                ],
+            }
+
+            manifest_path.write_text(
+                json.dumps(
+                    manifest,
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+
+            cmd.extend([
+                "--input-manifest",
+                str(manifest_path),
+            ])
+        else:
+            cmd.extend([
+                "--input",
+                str(input_dir),
+            ])
+
+        cmd.extend([
             "--output",
             str(output_dir),
             "--batch-id",
             batch_id,
             "--continue-on-error",
-        ]
+        ])
 
         if resume_batch is not None:
             cmd.extend([
@@ -2160,6 +2499,26 @@ class DogWalkerApp(tk.Tk):
             "生成済みデータは保持されています。\n"
         )
 
+    @staticmethod
+    def _play_completion_chime() -> None:
+        try:
+            sound_path = (
+                Path(__file__).resolve().parent.parent
+                / "assets"
+                / "completion_chime.wav"
+            )
+
+            if not sound_path.is_file():
+                return
+
+            winsound.PlaySound(
+                str(sound_path),
+                winsound.SND_FILENAME
+                | winsound.SND_ASYNC,
+            )
+        except Exception:
+            pass
+
     def _finish_success(self) -> None:
         self.status_var.set(
             "完了"
@@ -2235,6 +2594,11 @@ class DogWalkerApp(tk.Tk):
         self.open_button.configure(
             state=tk.NORMAL,
         )
+
+        threading.Thread(
+            target=self._play_completion_chime,
+            daemon=True,
+        ).start()
 
         self._show_completion_dialog(
             videos=videos,
