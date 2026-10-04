@@ -2052,6 +2052,11 @@ def main() -> int:
 
             continue
 
+        print(
+            f"GUI_RUN_DIR: {run_dir}",
+            flush=True,
+        )
+
         print("")
         print("#" * 76)
         print(

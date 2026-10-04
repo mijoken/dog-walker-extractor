@@ -1383,6 +1383,31 @@ class DogWalkerApp(tk.Tk):
         # Resolve the active per-video output directory.
         # --------------------------------------------------------
 
+        if text.startswith("GUI_RUN_DIR:"):
+            value = text.partition(":")[2].strip()
+
+            if value:
+                self.current_run_dir = Path(
+                    value
+                )
+
+                self.preview_path = (
+                    self.current_run_dir
+                    / "dog_scan"
+                    / "preview"
+                    / "latest.png"
+                )
+
+                self.preview_label.configure(
+                    image="",
+                    text=(
+                        "粗スキャン開始待ち\n\n"
+                        "プレビューは低頻度で更新されます"
+                    ),
+                )
+
+            return
+
         if text.startswith(
             "output root    :"
         ):
@@ -2500,11 +2525,7 @@ class DogWalkerApp(tk.Tk):
     @staticmethod
     def _play_completion_chime() -> None:
         try:
-            sound_path = (
-                Path(__file__).resolve().parent.parent
-                / "assets"
-                / "completion_chime.wav"
-            )
+            sound_path = ASSETS / "completion_chime.wav"
 
             if not sound_path.is_file():
                 return

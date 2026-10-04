@@ -23,6 +23,11 @@ def run_worker(
     script_name: str,
     worker_args: list[str],
 ) -> int:
+    sys.stdout.reconfigure(
+        line_buffering=True,
+        write_through=True,
+    )
+
     if script_name not in WORKERS:
         raise ValueError(
             f"Unknown worker: {script_name}"
