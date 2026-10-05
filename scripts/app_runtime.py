@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 
 from app_paths import scripts_dir
 
@@ -29,8 +30,13 @@ def build_script_command(
         )
 
     if is_frozen():
+        worker_executable = (
+            Path(sys.executable).parent
+            / "Dog Walker Extractor Worker.exe"
+        )
+
         return [
-            sys.executable,
+            str(worker_executable),
             "--worker",
             script_name,
             *args,

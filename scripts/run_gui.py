@@ -2236,6 +2236,11 @@ class DogWalkerApp(tk.Tk):
                 errors="replace",
                 bufsize=1,
                 env=child_env,
+                creationflags=getattr(
+                    subprocess,
+                    "CREATE_NO_WINDOW",
+                    0,
+                ),
             )
 
             assert (

@@ -51,12 +51,27 @@ a = Analysis(
 pyz = PYZ(a.pure)
 
 
-exe = EXE(
+gui_exe = EXE(
     pyz,
     a.scripts,
     [],
     exclude_binaries=True,
     name="Dog Walker Extractor",
+    debug=False,
+    bootloader_ignore_signals=False,
+    strip=False,
+    upx=True,
+    console=False,
+    disable_windowed_traceback=False,
+)
+
+
+worker_exe = EXE(
+    pyz,
+    a.scripts,
+    [],
+    exclude_binaries=True,
+    name="Dog Walker Extractor Worker",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -67,7 +82,8 @@ exe = EXE(
 
 
 coll = COLLECT(
-    exe,
+    gui_exe,
+    worker_exe,
     a.binaries,
     a.datas,
     strip=False,
